@@ -1,0 +1,13 @@
+#wrapper {
+    position: relative;
+    width: 600px;
+    height: 600px;
+}
+
+#canvas1, #canvas2 {
+    position: absolute;
+    top: 0px;
+    left: 0px;
+    width: 600px;
+    height: 600px;
+}

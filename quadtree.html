@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuadTree</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <h1>QuadTree</h1>
+
+  <!-- Description of this page -->
+  <p>The following canvas demonstrates range search on a 2D place containing 10k points under 1ms. </p>
+  <p>Click on the canvas to search for points in a 60x60 square around the click.</p>
+
+  <button onclick="tree.toggle_line()">Draw QuadTree lines</button>
+
+  <div id="wrapper">
+    <canvas id="canvas1" height="600" width="600"></canvas>
+    <canvas id="canvas2" height="600" width="600"></canvas>
+  </div>
+
+  <script>
+    const canvas2 = document.getElementById('canvas2');
+
+    /**
+     * A point in 2D space
+     */
+    class Point {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+      }
+
+      toString() {
+        return `Point(${this.x}, ${this.y})`;
+      }
+
+      equals(other) {
+        return this.x === other.x && this.y === other.y;
+      }
+    }
+
+    /**
+     * A node in a quadtree.
+     * 
+     * Order of children:
+     *  0 | 1
+     * ---+---
+     *  2 | 3
+     * 
+     * static properties:
+     * - SPLIT_THRESHOLD: max number of points in a leaf node before it splits into 4 children
+     * 
+     * @property {number} w - width of the node
+     * @property {number} h - height of the node
+     * @property {number} x - x coordinate of top left corner of the node
+     * @property {number} y - y coordinate of top left corner of the node
+     * @property {QuadNode} parent - parent node
+     * @property {QuadNode[]} children - children of this node
+     * @property {Point[]} points - points contained in this node
+     */
+    class QuadNode {
+      constructor(w, h, id, x = 0, y = 0, parent = null) {
+        this.id = id;
+        this.w = w;
+        this.h = h;
+        this.x = x;
+        this.y = y;
+        this.parent = parent;
+
+        this.children = [];
+        this.points = [];
+      }
+
+      /**
+       * @returns {boolean} true if this node is a branch node
+       */
+      hasChildren() {
+        return this.children.length > 0;
+      }
+
+      /**
+       * Insert a point into the tree
+       * 
+       * @param {Point} point - the point to insert
+       */
+      insert(point) {
+        // check if this point is within the bounds of this node
+        if (point.x < this.x || point.x >= this.x + this.w || point.y < this.y || point.y >= this.y + this.h) {
+          throw new Error('Point is out of range');
+        }
+
+        if (this.hasChildren()) {
+          // insert into child node
+          const idx = Number(point.x >= this.x + this.w / 2) + Number(point.y >= this.y + this.h / 2) * 2;
+          this.children[idx].insert(point);
+        } else {
+          // if identical point already exists, don't insert. 
+          // This is to prevent infinite splitting
+          if (this.points.some(p => p.equals(point))) {
+            return;
+          }
+
+          // insert into this node and split if necessary
+          this.points.push(point);
+          if (this.points.length > QuadNode.SPLIT_THRESHOLD) {
+            this.split();
+          }
+        }
+      }
+
+      /**
+       * Split this node into 4 children
+       */
+      split() {
+        const w = this.w / 2;
+        const h = this.h / 2;
+        this.children = [
+          new QuadNode(w, h, [...this.id, 0], this.x, this.y, this),
+          new QuadNode(this.w - w, h, [...this.id, 1], this.x + w, this.y, this),
+          new QuadNode(w, this.h - h, [...this.id, 2], this.x, this.y + h, this),
+          new QuadNode(this.w - w, this.h - h, [...this.id, 3], this.x + w, this.y + h, this),
+        ];
+        for (const p of this.points) {
+          this.insert(p);
+        }
+        this.points = [];
+      }
+
+      /**
+       * Get the leaf node that contains the given point
+       * 
+       * @param {Point} point - the point to search for
+       * @returns {QuadNode} the node that contains the point
+       */
+      getContainingNode(point) {
+        if (this.hasChildren()) {
+          const idx = Number(point.x >= this.x + this.w / 2) + Number(point.y >= this.y + this.h / 2) * 2;
+          return this.children[idx].getContainingNode(point);
+        } else {
+          return this;
+        }
+      }
+
+      /**
+       * Check if this node overlaps with given node.
+       */
+      overlap(other) {
+        return !(
+          this.x + this.w < other.x ||
+          other.x + other.w < this.x ||
+          this.y + this.h < other.y ||
+          other.y + other.h < this.y
+        );
+      }
+
+      /**
+       * Search for points within a given rectangular range
+       * 
+       * @param {number} x - x coordinate of center of range
+       * @param {number} y - y coordinate of center of range
+       * @param {number} halfW - half width of range
+       * @returns {Point[]} generator that iterates all points within range
+       */
+      * searchRange(x, y, halfW) {
+        yield* this._searchRange(new QuadNode(halfW * 2, halfW * 2, [], x - halfW, y - halfW));
+      }
+
+      * _searchRange(node) {
+        if (!this.overlap(node)) {
+          return;
+        }
+        if (this.hasChildren()) {
+          for (const c of this.children) {
+            yield* c._searchRange(node);
+          }
+        } else {
+          for (const p of this.points) {
+            if (node.x <= p.x && node.x + node.w > p.x && node.y <= p.y && node.y + node.h > p.y) {
+              yield p;
+            }
+          }
+        }
+      }
+    }
+
+    QuadNode.SPLIT_THRESHOLD = 4;
+
+    /**
+     * A class that draws a quadtree on a canvas
+     */
+    class QuadTreeDrawer {
+      constructor(w, h) {
+        this.root = new QuadNode(w, h, [0], 0, 0);
+
+        this.line_color = 'black';
+        this.point_color = 'black';
+        this.point_radius = 2;
+
+        this.do_draw_lines = true;
+      }
+
+      toggle_line() {
+        this.do_draw_lines = !this.do_draw_lines;
+        this.draw();
+      }
+
+      draw() {
+        const canvas = document.querySelector('#canvas1');
+
+        if (!canvas.getContext) {
+          return;
+        }
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // draw border
+        ctx.strokeStyle = this.line_color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.rect(0, 0, canvas.width, canvas.height);
+        ctx.stroke();
+        this._draw(this.root, ctx);
+      }
+
+      _draw(node, ctx) {
+        if (node.hasChildren()) {
+          for (const c of node.children) {
+            this._draw(c, ctx);
+          }
+          if (this.do_draw_lines) {
+            ctx.strokeStyle = this.line_color;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(node.x + node.w / 2, node.y);
+            ctx.lineTo(node.x + node.w / 2, node.y + node.h);
+            ctx.moveTo(node.x, node.y + node.h / 2);
+            ctx.lineTo(node.x + node.w, node.y + node.h / 2);
+            ctx.stroke();
+          }
+        } else {
+          ctx.fillStyle = this.point_color;
+          for (const p of node.points) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, this.point_radius, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+        }
+      }
+
+      click(x, y) {
+        let ctx = canvas2.getContext('2d');
+        ctx.clearRect(0, 0, canvas2.width, canvas2.height);
+        ctx.fillStyle = 'red';
+
+        const half_dimension = 30;
+        for (const p of this.root.searchRange(x, y, half_dimension)) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, this.point_radius, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
+    }
+
+    function on_canvas_click(event) {
+      const x = event.layerX;
+      const y = event.layerY;
+      tree.click(x, y);
+    }
+
+    canvas2.addEventListener('click', on_canvas_click, false);
+
+    function generate_points() {
+      for (let i = 0; i < 10000; i++) {
+        tree.root.insert(new Point(Math.random() * 600, Math.random() * 600));
+      }
+    }
+
+    let tree = new QuadTreeDrawer(600, 600);
+    tree.do_draw_lines = false;
+    generate_points();
+    tree.draw();
+  </script>
+</body>
+
+</html>
