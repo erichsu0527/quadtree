@@ -299,15 +299,13 @@
       }
 
       /**
-       * Move a point to a new location
+       * Remove a point from the tree
        * 
-       * @param {Point} from - the point to move
-       * @param {Point} to - the new location
+       * @param {Point} p - the point to remove
        */
-      move(from, to) {
-        let node = this.getContainingNode(new Point(from.x, from.y));   // get the node that contains the point
-        node.points = node.points.filter(p => p.x !== from.x && p.y !== from.y);  // remove the point from the node
-        this.insert(to);  // insert the point into the tree
+      remove(point) {
+        let node = this.getContainingNode(new Point(point.x, point.y));   // get the node that contains the point
+        node.points = node.points.filter(p => p.x !== point.x && p.y !== point.y);  // remove the point from the node
         node.merge_parent();  // merge parent nodes if necessary
       }
 
@@ -429,7 +427,8 @@
         if (this.selected_point === null) {
           return;
         }
-        this.root.move(this.selected_point, new Point(x, y));
+        this.root.remove(this.selected_point);
+        this.root.insert(new Point(x, y))
         this.draw();
         this.selected_point = null;
 
