@@ -18,7 +18,7 @@
   <button onclick="set_range_mode()">Search range</button>
   <button onclick="set_move_mode()">Move point</button>
 
-  <p id="description">Click on the canvas to search for points in a 60x60 square around the click.</p>
+  <p id="description">Click on the canvas to search for points in a 30 pixel radius around the click.</p>
 
   <div id="wrapper">
     <canvas id="canvas1" height="600" width="600"></canvas>
@@ -170,14 +170,14 @@
        * 
        * @param {number} x - x coordinate of center of range
        * @param {number} y - y coordinate of center of range
-       * @param {number} halfW - half width of range
+       * @param {number} radius - radius of range
        * @returns {Point[]} generator that iterates all points within range
        */
-      * searchRange(x, y, halfW) {
-        yield* this._searchRange(new QuadNode(halfW * 2, halfW * 2, [], x - halfW, y - halfW));
+      * searchRange(x, y, radius) {
+        yield* this._searchRange(new QuadNode(radius * 2, radius * 2, [], x - radius, y - radius), radius * radius);
       }
 
-      * _searchRange(node) {
+      * _searchRange(node, radius) {
         // If this node does not overlap with the given node, no points are in range. 
         if (!this.overlap(node)) {
           return;
@@ -185,12 +185,12 @@
         if (this.hasChildren()) {
           // search children
           for (const c of this.children) {
-            yield* c._searchRange(node);
+            yield* c._searchRange(node, radius);
           }
         } else {
           // search points
           for (const p of this.points) {
-            if (node.x <= p.x && node.x + node.w > p.x && node.y <= p.y && node.y + node.h > p.y) {
+            if ((node.x + node.w / 2 - p.x) ** 2 + (node.y + node.h / 2 - p.y) ** 2 <= radius) {
               yield p;
             }
           }
@@ -477,7 +477,7 @@
       generate_points(10000);
       tree.draw();
 
-      description.innerHTML = 'Click on the canvas to search for points in a 60x60 square around the click.';
+      description.innerHTML = 'Click on the canvas to search for points in 30 pixel radius around the click.';
     }
 
     function set_move_mode() {
