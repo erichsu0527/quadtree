@@ -13,9 +13,12 @@
 
   <!-- Description of this page -->
   <p>The following canvas demonstrates range search on a 2D place containing 10k points under 1ms. </p>
-  <p>Click on the canvas to search for points in a 60x60 square around the click.</p>
 
   <button onclick="tree.toggle_line()">Draw QuadTree lines</button>
+  <button onclick="set_range_mode()">Search range</button>
+  <button onclick="set_move_mode()">Move point</button>
+
+  <p id="description">Click on the canvas to search for points in a 60x60 square around the click.</p>
 
   <div id="wrapper">
     <canvas id="canvas1" height="600" width="600"></canvas>
@@ -63,6 +66,7 @@
      * @property {Point[]} points - points contained in this node
      */
     class QuadNode {
+      static SPLIT_THRESHOLD = 4;
       constructor(w, h, id, x = 0, y = 0, parent = null) {
         this.id = id;
         this.w = w;
@@ -106,16 +110,18 @@
 
           // insert into this node and split if necessary
           this.points.push(point);
-          if (this.points.length > QuadNode.SPLIT_THRESHOLD) {
-            this.split();
-          }
+
+          this.check_split();
         }
       }
 
       /**
-       * Split this node into 4 children
+       * Split this node into 4 children if there are more than SPLIT_THRESHOLD points in this node
        */
-      split() {
+      check_split() {
+        if (this.points.length <= QuadNode.SPLIT_THRESHOLD) {
+          return;
+        }
         const w = this.w / 2;
         const h = this.h / 2;
         this.children = [
@@ -131,7 +137,9 @@
       }
 
       /**
-       * Get the leaf node that contains the given point
+       * Get the leaf node that contains the given point. 
+       * 
+       * Assume given point is within the bounds of this node.
        * 
        * @param {Point} point - the point to search for
        * @returns {QuadNode} the node that contains the point
@@ -170,14 +178,17 @@
       }
 
       * _searchRange(node) {
+        // If this node does not overlap with the given node, no points are in range. 
         if (!this.overlap(node)) {
           return;
         }
         if (this.hasChildren()) {
+          // search children
           for (const c of this.children) {
             yield* c._searchRange(node);
           }
         } else {
+          // search points
           for (const p of this.points) {
             if (node.x <= p.x && node.x + node.w > p.x && node.y <= p.y && node.y + node.h > p.y) {
               yield p;
@@ -185,12 +196,168 @@
           }
         }
       }
+
+      /**
+       * Draw lines on the canvas to show nodes of the quadtree. 
+       * 
+       * @param {CanvasRenderingContext2D} ctx - the canvas context to draw on
+       * @param {string} line_color - the color of the lines
+       */
+      draw_line(ctx, line_color) {
+        if (!this.hasChildren()) {
+          return;
+        }
+        for (const c of this.children) {
+          c.draw_line(ctx, line_color);
+        }
+        ctx.strokeStyle = line_color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(this.x + this.w / 2, this.y);
+        ctx.lineTo(this.x + this.w / 2, this.y + this.h);
+        ctx.moveTo(this.x, this.y + this.h / 2);
+        ctx.lineTo(this.x + this.w, this.y + this.h / 2);
+        ctx.stroke();
+      }
+
+      /**
+       * Draw points on the canvas. 
+       */
+      draw_points(ctx, point_color, point_radius) {
+        for (const c of this.children) {
+          c.draw_points(ctx, point_color, point_radius);
+        }
+        ctx.fillStyle = point_color;
+        for (const p of this.points) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, point_radius, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
+
+      /**
+       * Find the closest point to a given point.
+       * 
+       * Procedure:
+       *  1. Starting from the leaf node that contains the given point, working towards the root node. 
+       *  2. For each node, go through all children and find the closest point.
+       * 
+       * To optimize, we can stop searching a node if the closest possible point in that node is further than the closest point found so far and
+       * we skip last searching node, since it's always one of the children of the current node. 
+       * 
+       * @param {number} x - x coordinate of the point
+       * @param {number} y - y coordinate of the point
+       */
+      find_closest(x, y) {
+        let p = new Point(x, y);
+        let data = [Infinity, null];          // stores closest distance and point
+        let node = this.getContainingNode(p); // start from the leaf node that contains the point
+        let last_node = null;
+        do {
+          // Search all children of this node. Last_node is skipped since it's always one of the children of this node.
+          node._find_closest_from_children(data, x, y, last_node);
+
+          // Step up to parent node
+          last_node = node;
+          node = node.parent;
+        } while (node !== null);
+        return data[1];
+      }
+
+      /**
+       * Check if this node can contain a point that is closer than the closest point found so far.
+       */
+      _can_contain_closer(x, y, data) {
+        let [dist, point] = data;
+        if (x + dist > this.x || x - dist < this.x + this.w || y + dist > this.y || y - dist < this.y + this.h) {
+          return true;
+        }
+        return false;
+      }
+
+      /**
+       * Find the closest point from the children of this node.
+       */
+      _find_closest_from_children(data, x, y, last_node) {
+        if (!this._can_contain_closer(x, y, data)) {
+          return;
+        }
+        for (const c of this.children) {
+          if (c === last_node) {
+            continue;
+          }
+          c._find_closest_from_children(data, x, y, null);
+        }
+
+        for (const p of this.points) {
+          const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+          if (d < data[0]) {
+            data[0] = d;
+            data[1] = p;
+          }
+        }
+      }
+
+      /**
+       * Move a point to a new location
+       * 
+       * @param {Point} from - the point to move
+       * @param {Point} to - the new location
+       */
+      move(from, to) {
+        let node = this.getContainingNode(new Point(from.x, from.y));   // get the node that contains the point
+        node.points = node.points.filter(p => p.x !== from.x && p.y !== from.y);  // remove the point from the node
+        this.insert(to);  // insert the point into the tree
+        node.merge_parent();  // merge parent nodes if necessary
+      }
+
+      /**
+       * Merge nodes if the total number of points in the subtree is less than SPLIT_THRESHOLD
+       * 
+       * Starting from leaf node, count the number of points in the subtree.
+       * If the total number of points is less than SPLIT_THRESHOLD, merge all children into the parent node.
+       * Repeat until the root node is reached or the total number of points is greater than SPLIT_THRESHOLD.
+       */
+      merge_parent() {
+        let node = this.parent;
+        let last_node = this;
+        let count = this.points.length;
+
+        while (node !== null) {
+          for (let c of node.children) {
+            if (c === last_node) {
+              continue;
+            }
+            count += c.count_points();
+          }
+
+          if (count > QuadNode.SPLIT_THRESHOLD) {
+            break;
+          }
+          for (let c of node.children) {
+            node.points.push(...c.points);
+            c.points = [];
+          }
+          node.children = [];
+          last_node = node;
+          node = node.parent;
+        }
+      }
+
+      /**
+       * Count the number of points in the subtree
+       */
+      count_points() {
+        if (this.hasChildren()) {
+          return this.children.reduce((acc, c) => acc + c.count_points(), 0);
+        } else {
+          return this.points.length;
+        }
+      }
     }
 
-    QuadNode.SPLIT_THRESHOLD = 4;
-
     /**
-     * A class that draws a quadtree on a canvas
+     * A class that manipulates a QuadTree and draws it on a canvas
      */
     class QuadTreeDrawer {
       constructor(w, h) {
@@ -201,6 +368,8 @@
         this.point_radius = 2;
 
         this.do_draw_lines = true;
+
+        this.selected_point = null;
       }
 
       toggle_line() {
@@ -223,65 +392,115 @@
         ctx.beginPath();
         ctx.rect(0, 0, canvas.width, canvas.height);
         ctx.stroke();
-        this._draw(this.root, ctx);
-      }
-
-      _draw(node, ctx) {
-        if (node.hasChildren()) {
-          for (const c of node.children) {
-            this._draw(c, ctx);
-          }
-          if (this.do_draw_lines) {
-            ctx.strokeStyle = this.line_color;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(node.x + node.w / 2, node.y);
-            ctx.lineTo(node.x + node.w / 2, node.y + node.h);
-            ctx.moveTo(node.x, node.y + node.h / 2);
-            ctx.lineTo(node.x + node.w, node.y + node.h / 2);
-            ctx.stroke();
-          }
-        } else {
-          ctx.fillStyle = this.point_color;
-          for (const p of node.points) {
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, this.point_radius, 0, 2 * Math.PI);
-            ctx.fill();
-          }
+        if (this.do_draw_lines) {
+          this.root.draw_line(ctx, this.line_color);
         }
+        this.root.draw_points(ctx, this.point_color, this.point_radius)
       }
 
-      click(x, y) {
+      select_region(x, y) {
         let ctx = canvas2.getContext('2d');
         ctx.clearRect(0, 0, canvas2.width, canvas2.height);
         ctx.fillStyle = 'red';
 
-        const half_dimension = 30;
-        for (const p of this.root.searchRange(x, y, half_dimension)) {
+        for (const p of this.root.searchRange(x, y, 30)) {
           ctx.beginPath();
           ctx.arc(p.x, p.y, this.point_radius, 0, 2 * Math.PI);
           ctx.fill();
         }
+      }
+
+      select_closest(x, y) {
+        let ctx = canvas2.getContext('2d');
+        ctx.clearRect(0, 0, canvas2.width, canvas2.height);
+        ctx.fillStyle = 'red';
+
+        let t = Date.now();
+        let p = this.root.find_closest(x, y);
+        if (p !== null) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, this.point_radius, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+        this.selected_point = p;
+      }
+
+      move(x, y) {
+        if (this.selected_point === null) {
+          return;
+        }
+        this.root.move(this.selected_point, new Point(x, y));
+        this.draw();
+        this.selected_point = null;
+
+        let ctx = canvas2.getContext('2d');
+        ctx.clearRect(0, 0, canvas2.width, canvas2.height);
       }
     }
 
     function on_canvas_click(event) {
       const x = event.layerX;
       const y = event.layerY;
-      tree.click(x, y);
+      if (mode === 'range') {
+        tree.select_region(x, y);
+        return;
+      } else {
+        if (event.button === 0) {
+          tree.select_closest(x, y);
+        }
+        if (event.button === 2) {
+          tree.move(x, y);
+        }
+      }
     }
 
-    canvas2.addEventListener('click', on_canvas_click, false);
+    canvas2.addEventListener('click', on_canvas_click);
+    canvas2.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      on_canvas_click(e);
+    });
 
-    function generate_points() {
-      for (let i = 0; i < 10000; i++) {
+    function generate_points(n) {
+      for (let i = 0; i < n; i++) {
         tree.root.insert(new Point(Math.random() * 600, Math.random() * 600));
       }
     }
 
+    function set_range_mode() {
+      mode = 'range';
+
+      let ctx = canvas2.getContext('2d');
+      ctx.clearRect(0, 0, canvas2.width, canvas2.height);
+
+      let new_tree = new QuadTreeDrawer(600, 600);
+      new_tree.do_draw_lines = tree.do_draw_lines;
+      tree = new_tree;
+      generate_points(10000);
+      tree.draw();
+
+      description.innerHTML = 'Click on the canvas to search for points in a 60x60 square around the click.';
+    }
+
+    function set_move_mode() {
+      mode = 'move';
+
+      let ctx = canvas2.getContext('2d');
+      ctx.clearRect(0, 0, canvas2.width, canvas2.height);
+
+      let new_tree = new QuadTreeDrawer(600, 600);
+      new_tree.do_draw_lines = tree.do_draw_lines;
+      tree = new_tree;
+      generate_points(100);
+      tree.draw();
+
+      description.innerHTML = 'Left click on the canvas to find the closest point to the click. Right click to move the closest point to the click.';
+    }
+
     let tree = new QuadTreeDrawer(600, 600);
+    let mode = 'range';
+    let description = document.querySelector('#description');
     tree.do_draw_lines = false;
-    generate_points();
+    generate_points(10000);
     tree.draw();
   </script>
 </body>
