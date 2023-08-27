@@ -82,7 +82,7 @@
       /**
        * @returns {boolean} true if this node is a branch node
        */
-      hasChildren() {
+      has_children() {
         return this.children.length > 0;
       }
 
@@ -97,7 +97,7 @@
           throw new Error('Point is out of range');
         }
 
-        if (this.hasChildren()) {
+        if (this.has_children()) {
           // insert into child node
           const idx = Number(point.x >= this.x + this.w / 2) + Number(point.y >= this.y + this.h / 2) * 2;
           this.children[idx].insert(point);
@@ -144,10 +144,10 @@
        * @param {Point} point - the point to search for
        * @returns {QuadNode} the node that contains the point
        */
-      getContainingNode(point) {
-        if (this.hasChildren()) {
+      get_containing_node(point) {
+        if (this.has_children()) {
           const idx = Number(point.x >= this.x + this.w / 2) + Number(point.y >= this.y + this.h / 2) * 2;
-          return this.children[idx].getContainingNode(point);
+          return this.children[idx].get_containing_node(point);
         } else {
           return this;
         }
@@ -173,19 +173,19 @@
        * @param {number} radius - radius of range
        * @returns {Point[]} generator that iterates all points within range
        */
-      * searchRange(x, y, radius) {
-        yield* this._searchRange(new QuadNode(radius * 2, radius * 2, [], x - radius, y - radius), radius * radius);
+      * search_range(x, y, radius) {
+        yield* this._search_range(new QuadNode(radius * 2, radius * 2, [], x - radius, y - radius), radius * radius);
       }
 
-      * _searchRange(node, radius) {
+      * _search_range(node, radius) {
         // If this node does not overlap with the given node, no points are in range. 
         if (!this.overlap(node)) {
           return;
         }
-        if (this.hasChildren()) {
+        if (this.has_children()) {
           // search children
           for (const c of this.children) {
-            yield* c._searchRange(node, radius);
+            yield* c._search_range(node, radius);
           }
         } else {
           // search points
@@ -204,7 +204,7 @@
        * @param {string} line_color - the color of the lines
        */
       draw_line(ctx, line_color) {
-        if (!this.hasChildren()) {
+        if (!this.has_children()) {
           return;
         }
         for (const c of this.children) {
@@ -251,7 +251,7 @@
       find_closest(x, y) {
         let p = new Point(x, y);
         let data = [Infinity, null];          // stores closest distance and point
-        let node = this.getContainingNode(p); // start from the leaf node that contains the point
+        let node = this.get_containing_node(p); // start from the leaf node that contains the point
         let last_node = null;
         do {
           // Search all children of this node. Last_node is skipped since it's always one of the children of this node.
@@ -304,7 +304,7 @@
        * @param {Point} p - the point to remove
        */
       remove(point) {
-        let node = this.getContainingNode(new Point(point.x, point.y));   // get the node that contains the point
+        let node = this.get_containing_node(new Point(point.x, point.y));   // get the node that contains the point
         node.points = node.points.filter(p => p.x !== point.x && p.y !== point.y);  // remove the point from the node
         node.merge_parent();  // merge parent nodes if necessary
       }
@@ -346,7 +346,7 @@
        * Count the number of points in the subtree
        */
       count_points() {
-        if (this.hasChildren()) {
+        if (this.has_children()) {
           return this.children.reduce((acc, c) => acc + c.count_points(), 0);
         } else {
           return this.points.length;
@@ -401,7 +401,7 @@
         ctx.clearRect(0, 0, canvas2.width, canvas2.height);
         ctx.fillStyle = 'red';
 
-        for (const p of this.root.searchRange(x, y, 30)) {
+        for (const p of this.root.search_range(x, y, 30)) {
           ctx.beginPath();
           ctx.arc(p.x, p.y, this.point_radius, 0, 2 * Math.PI);
           ctx.fill();
