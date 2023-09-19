@@ -7,7 +7,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def index():
-    return send_from_directory('.', 'quadtree.html')
+    return send_from_directory('.', 'index.html')
 
 @app.route('/<filename>')
 def files(filename):
